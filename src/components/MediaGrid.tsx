@@ -1,5 +1,5 @@
-import React from 'react';
-import { Play, Download, Trash2, Image as ImageIcon, Video as VideoIcon, User } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Download, Trash2, Image as ImageIcon, Video as VideoIcon, User, AlertCircle } from 'lucide-react';
 import { UploadItem } from '../types';
 import { formatBytes } from '../utils/security';
 
@@ -16,6 +16,8 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
   onDelete,
   filter,
 }) => {
+  const [mediaErrors, setMediaErrors] = useState<Record<string, boolean>>({});
+
   const filtered = uploads.filter((item) => {
     if (filter === 'all') return true;
     return item.mediaType === filter;
@@ -46,6 +48,8 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
           hour: '2-digit',
           minute: '2-digit',
         });
+        const isLocalDevUrl = item.downloadUrl?.startsWith('/uploads/');
+        const hasError = mediaErrors[item.id] || isLocalDevUrl;
 
         return (
           <div
@@ -53,12 +57,28 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
             onClick={() => onSelect(item)}
             className="group relative aspect-square rounded-xl overflow-hidden bg-[#EFECE6] border border-[#E5E0D5] cursor-pointer shadow-sm hover:shadow-md transition-all transform hover:-translate-y-0.5"
           >
-            {item.mediaType === 'video' ? (
+            {hasError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-[#F3EFE6] border border-dashed border-[#D5CDBD]">
+                <div className="w-9 h-9 rounded-full bg-[#EAE3D3] flex items-center justify-center mb-1.5 text-[#8A7963]">
+                  {isLocalDevUrl ? <AlertCircle className="w-4 h-4 text-amber-600" /> : <ImageIcon className="w-4 h-4" />}
+                </div>
+                <div className="text-[11px] font-semibold text-[#3D3A36] truncate max-w-full px-1">
+                  {item.safeDisplayName}
+                </div>
+                <span className="mt-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                  {isLocalDevUrl ? 'Local Dev File' : 'Media Missing'}
+                </span>
+                <span className="text-[9px] text-[#78736B] mt-1 line-clamp-1">
+                  Click to inspect / remove
+                </span>
+              </div>
+            ) : item.mediaType === 'video' ? (
               <div className="relative w-full h-full bg-black/80 flex items-center justify-center">
                 <video
                   src={item.downloadUrl}
                   className="w-full h-full object-cover opacity-85"
                   preload="metadata"
+                  onError={() => setMediaErrors((prev) => ({ ...prev, [item.id]: true }))}
                 />
                 <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/20 transition-colors">
                   <div className="w-10 h-10 rounded-full bg-white/90 text-[#1C1B1A] flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
@@ -71,6 +91,7 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
                 src={item.downloadUrl}
                 alt={item.safeDisplayName}
                 loading="lazy"
+                onError={() => setMediaErrors((prev) => ({ ...prev, [item.id]: true }))}
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               />
             )}
@@ -113,21 +134,23 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
               </div>
 
               <div className="flex items-center space-x-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                <a
-                  href={item.downloadUrl}
-                  download={item.fileName}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Download"
-                  className="p-1 rounded bg-white/20 hover:bg-white text-white hover:text-[#1C1B1A] transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </a>
+                {!hasError && (
+                  <a
+                    href={item.downloadUrl}
+                    download={item.fileName}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Download"
+                    className="p-1 rounded bg-white/20 hover:bg-white text-white hover:text-[#1C1B1A] transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                  </a>
+                )}
                 <button
                   onClick={() => onDelete(item)}
                   title="Delete"
                   aria-label="Delete media item"
-                  className="p-1 rounded bg-white/20 hover:bg-red-600 text-white transition-colors"
+                  className="p-1 rounded bg-red-600/80 hover:bg-red-600 text-white transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>

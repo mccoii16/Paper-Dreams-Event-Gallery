@@ -323,13 +323,19 @@ export async function uploadGuestMedia(params: UploadGuestFileParams): Promise<U
         }
       );
     });
-  } catch (storageError) {
-    console.warn('Direct client storage upload failed, utilizing resilient server upload pipeline:', storageError);
+  } catch (storageError: unknown) {
+    console.warn('Direct client storage upload failed:', storageError);
+    const errCode = (storageError as { code?: string })?.code;
+    
+    // Attempt server fallback (for local dev server)
     try {
       downloadUrl = await uploadMediaViaServerFallback(eventId, `${timestamp}_${uploadId}`, safeName, file, cleanGuestName);
       onProgress?.(100);
     } catch (fallbackError) {
       console.error('All upload storage attempts encountered error:', fallbackError);
+      if (errCode === 'storage/unauthorized') {
+        throw new Error('Upload blocked by Firebase Storage Rules (storage/unauthorized). Please configure Storage Rules in the Firebase Console to allow uploads.');
+      }
       throw new Error(fallbackError instanceof Error ? fallbackError.message : 'Media upload failed. Please try again.');
     }
   }

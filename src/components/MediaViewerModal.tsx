@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Download, Trash2, Calendar, FileText, HardDrive, User } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Download, Trash2, Calendar, FileText, HardDrive, User, AlertCircle } from 'lucide-react';
 import { UploadItem } from '../types';
 import { formatBytes } from '../utils/security';
 
@@ -16,7 +16,12 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
   onDelete,
   isDeleting,
 }) => {
+  const [hasError, setHasError] = useState(false);
+
   if (!upload) return null;
+
+  const isLocalDevUrl = upload.downloadUrl?.startsWith('/uploads/');
+  const showErrorCard = hasError || isLocalDevUrl;
 
   const handleDownload = () => {
     const link = document.createElement('a');
@@ -57,14 +62,16 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              onClick={handleDownload}
-              title="Download file"
-              aria-label="Download media file"
-              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-            >
-              <Download className="w-5 h-5" />
-            </button>
+            {!showErrorCard && (
+              <button
+                onClick={handleDownload}
+                title="Download file"
+                aria-label="Download media file"
+                className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <Download className="w-5 h-5" />
+              </button>
+            )}
             <button
               onClick={() => onDelete(upload)}
               disabled={isDeleting}
@@ -86,17 +93,39 @@ export const MediaViewerModal: React.FC<MediaViewerModalProps> = ({
 
         {/* Media Canvas Body */}
         <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-black/50 min-h-[300px]">
-          {upload.mediaType === 'video' ? (
+          {showErrorCard ? (
+            <div className="flex flex-col items-center justify-center p-8 text-center max-w-md bg-white/5 rounded-2xl border border-white/10 my-6">
+              <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mb-3">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h5 className="font-semibold text-base text-white mb-2">
+                {isLocalDevUrl ? 'Local Dev Test File' : 'Media Preview Unavailable'}
+              </h5>
+              <p className="text-xs text-white/70 mb-5 leading-relaxed">
+                This item was saved to local disk during a prior development session before Firebase Storage was connected. It does not exist on your live Vercel cloud deployment.
+              </p>
+              <button
+                onClick={() => onDelete(upload)}
+                disabled={isDeleting}
+                className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-md transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isDeleting ? 'Deleting record...' : 'Delete Legacy Record'}</span>
+              </button>
+            </div>
+          ) : upload.mediaType === 'video' ? (
             <video
               src={upload.downloadUrl}
               controls
               autoPlay
+              onError={() => setHasError(true)}
               className="max-h-[60vh] max-w-full rounded-lg object-contain shadow-lg"
             />
           ) : (
             <img
               src={upload.downloadUrl}
               alt={upload.safeDisplayName}
+              onError={() => setHasError(true)}
               className="max-h-[65vh] max-w-full rounded-lg object-contain shadow-lg"
             />
           )}
