@@ -23,6 +23,7 @@ export interface EventItem {
   bannerUrl: string;
   publicToken: string;
   organizerIds: string[];
+  organizerEmails?: string[];
   status: EventStatus;
   maxFilesPerGuest: number;
   maxFileSizeMb: number;

@@ -29,10 +29,15 @@ export const OrganizerDashboard: React.FC<OrganizerDashboardProps> = ({ onNaviga
 
   useEffect(() => {
     if (!user) return;
-    const unsub = subscribeEvents(user.uid, false, (items) => {
-      setEvents(items);
-      setLoading(false);
-    });
+    const unsub = subscribeEvents(
+      user.uid,
+      false,
+      (items) => {
+        setEvents(items);
+        setLoading(false);
+      },
+      user.email || undefined
+    );
     return () => unsub();
   }, [user]);
 

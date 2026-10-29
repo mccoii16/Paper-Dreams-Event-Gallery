@@ -1,6 +1,7 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   updateDoc,
@@ -103,6 +104,7 @@ export async function createOrganizer(params: CreateOrganizerParams): Promise<Us
       try {
         await updateDoc(doc(db, 'events', evId), {
           organizerIds: arrayUnion(assignedUid),
+          organizerEmails: arrayUnion(cleanEmail),
           updatedAt: now,
         });
       } catch (e) {
@@ -147,6 +149,20 @@ export async function updateOrganizerStatus(userId: string, status: UserStatus):
  * Deletes organizer account via server endpoint with client fallback
  */
 export async function deleteOrganizer(userId: string): Promise<void> {
+  // Read user profile first to clean up assignments
+  let userEmail = '';
+  let assignedIds: string[] = [];
+  try {
+    const userSnap = await getDoc(doc(db, 'users', userId));
+    if (userSnap.exists()) {
+      const data = userSnap.data() as UserProfile;
+      userEmail = (data.email || '').trim().toLowerCase();
+      assignedIds = data.assignedEventIds || [];
+    }
+  } catch (readErr) {
+    console.warn('Read user profile for delete cleanup notice:', readErr);
+  }
+
   try {
     const headers = await getAuthHeaders();
     const res = await fetch(`/api/admin/delete-organizer/${userId}`, {
@@ -155,11 +171,27 @@ export async function deleteOrganizer(userId: string): Promise<void> {
     });
 
     if (res.ok) return;
-  } catch (apiErr) {
-    console.warn('API delete-organizer notice, falling back to direct write:', apiErr);
+  } catch {
+    // API notice handled, proceeding to client fallback
   }
 
   try {
+    // Clean up event organizerIds and organizerEmails
+    for (const evId of assignedIds) {
+      try {
+        const updatePayload: Record<string, any> = {
+          organizerIds: arrayRemove(userId),
+          updatedAt: new Date().toISOString(),
+        };
+        if (userEmail) {
+          updatePayload.organizerEmails = arrayRemove(userEmail);
+        }
+        await updateDoc(doc(db, 'events', evId), updatePayload);
+      } catch (evErr) {
+        console.warn('Event cleanup error:', evErr);
+      }
+    }
+
     await deleteDoc(doc(db, 'users', userId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
@@ -169,10 +201,12 @@ export async function deleteOrganizer(userId: string): Promise<void> {
 export async function setOrganizerEventAssignments(
   userId: string,
   newEventIds: string[],
-  previousEventIds: string[]
+  previousEventIds: string[],
+  userEmail?: string
 ): Promise<void> {
   const path = `users/${userId}`;
   const now = new Date().toISOString();
+  const cleanEmail = userEmail?.trim().toLowerCase();
 
   try {
     await updateDoc(doc(db, 'users', userId), {
@@ -184,10 +218,14 @@ export async function setOrganizerEventAssignments(
     const removedIds = previousEventIds.filter((id) => !newEventIds.includes(id));
     for (const evId of removedIds) {
       try {
-        await updateDoc(doc(db, 'events', evId), {
+        const updatePayload: Record<string, any> = {
           organizerIds: arrayRemove(userId),
           updatedAt: now,
-        });
+        };
+        if (cleanEmail) {
+          updatePayload.organizerEmails = arrayRemove(cleanEmail);
+        }
+        await updateDoc(doc(db, 'events', evId), updatePayload);
       } catch (e) {
         console.warn('Assignment remove error:', e);
       }
@@ -197,10 +235,14 @@ export async function setOrganizerEventAssignments(
     const addedIds = newEventIds.filter((id) => !previousEventIds.includes(id));
     for (const evId of addedIds) {
       try {
-        await updateDoc(doc(db, 'events', evId), {
+        const updatePayload: Record<string, any> = {
           organizerIds: arrayUnion(userId),
           updatedAt: now,
-        });
+        };
+        if (cleanEmail) {
+          updatePayload.organizerEmails = arrayUnion(cleanEmail);
+        }
+        await updateDoc(doc(db, 'events', evId), updatePayload);
       } catch (e) {
         console.warn('Assignment add error:', e);
       }

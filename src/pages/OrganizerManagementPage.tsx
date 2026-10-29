@@ -9,6 +9,10 @@ import {
   Check,
   X,
   Search,
+  Copy,
+  Share2,
+  Key,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { UserProfile, EventItem, UserStatus } from '../types';
@@ -37,8 +41,18 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [newAssignedEvents, setNewAssignedEvents] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Credentials / Invitation Share Modal State
+  const [credentialsModalInfo, setCredentialsModalInfo] = useState<{
+    name: string;
+    email: string;
+    password?: string;
+    eventNames: string[];
+  } | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   // Assign Modal State
   const [editingOrganizer, setEditingOrganizer] = useState<UserProfile | null>(null);
@@ -80,12 +94,25 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
       await createOrganizer({
         name: newName,
         email: newEmail,
+        password: newPassword.trim() || undefined,
         assignedEventIds: newAssignedEvents,
+      });
+
+      const assignedNames = events
+        .filter((ev) => newAssignedEvents.includes(ev.id))
+        .map((ev) => ev.name);
+
+      setCredentialsModalInfo({
+        name: newName,
+        email: newEmail,
+        password: newPassword.trim() || undefined,
+        eventNames: assignedNames,
       });
 
       setIsCreateOpen(false);
       setNewName('');
       setNewEmail('');
+      setNewPassword('');
       setNewAssignedEvents([]);
       await loadData();
     } catch (err: unknown) {
@@ -127,7 +154,8 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
       await setOrganizerEventAssignments(
         editingOrganizer.uid,
         selectedEventIds,
-        editingOrganizer.assignedEventIds || []
+        editingOrganizer.assignedEventIds || [],
+        editingOrganizer.email
       );
       setOrganizers((prev) =>
         prev.map((o) =>
@@ -286,7 +314,25 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center space-x-2 self-end md:self-auto pt-2 md:pt-0 border-t md:border-t-0 border-[#F2EEE4]">
+                <div className="flex flex-wrap items-center gap-2 self-end md:self-auto pt-2 md:pt-0 border-t md:border-t-0 border-[#F2EEE4]">
+                  <button
+                    onClick={() => {
+                      const assignedNames = events
+                        .filter((ev) => (org.assignedEventIds || []).includes(ev.id))
+                        .map((ev) => ev.name);
+                      setCredentialsModalInfo({
+                        name: org.name,
+                        email: org.email,
+                        eventNames: assignedNames,
+                      });
+                    }}
+                    className="py-1.5 px-3 rounded-lg bg-[#FAF9F5] border border-[#DDD7CB] hover:bg-[#F2EEE4] text-xs font-semibold text-[#1C1B1A] transition-colors flex items-center space-x-1.5"
+                    title="Share login credentials & instructions"
+                  >
+                    <Share2 className="w-3.5 h-3.5 text-[#9E7D46]" />
+                    <span>Share Credentials</span>
+                  </button>
+
                   <button
                     onClick={() => {
                       setEditingOrganizer(org);
@@ -398,6 +444,24 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
                   placeholder="organizer@weddingevents.com"
+                  className="w-full px-3.5 py-2.5 bg-[#FAF9F5] border border-[#DDD7CB] focus:border-[#1C1B1A] rounded-xl text-xs text-[#1C1B1A] outline-none"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[#4A4947]">
+                    Initial Password (Optional)
+                  </label>
+                  <span className="text-[10px] text-[#8C8983]">
+                    Leave blank for Google Sign-In
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="e.g. Event2026! (or leave blank for Google)"
                   className="w-full px-3.5 py-2.5 bg-[#FAF9F5] border border-[#DDD7CB] focus:border-[#1C1B1A] rounded-xl text-xs text-[#1C1B1A] outline-none"
                 />
               </div>
@@ -520,6 +584,127 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
                 className="py-2.5 px-5 rounded-xl bg-[#1C1B1A] hover:bg-[#333230] text-xs font-semibold text-white shadow-xs disabled:opacity-50"
               >
                 {submitting ? 'Saving...' : 'Save Assignments'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credentials & Invitation Share Modal */}
+      {credentialsModalInfo && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-[#E8E3D8] rounded-3xl p-6 sm:p-7 max-w-lg w-full shadow-2xl relative">
+            <button
+              onClick={() => {
+                setCredentialsModalInfo(null);
+                setCopiedInvite(false);
+              }}
+              className="absolute top-4 right-4 p-2 text-[#7A7875] hover:text-[#1C1B1A] rounded-full"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-2 text-[#9E7D46] mb-1">
+              <Key className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-widest font-semibold">
+                Organizer Access Hand-off
+              </span>
+            </div>
+            <h3 className="text-xl font-serif font-bold text-[#1C1B1A] mb-1">
+              Organizer Login Credentials
+            </h3>
+            <p className="text-xs text-[#6E6D6B] mb-5">
+              Copy this ready-to-send invitation to give {credentialsModalInfo.name} immediate access to their assigned events.
+            </p>
+
+            <div className="bg-[#FAF9F5] border border-[#DDD7CB] rounded-2xl p-4 space-y-3 mb-5 text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D5]">
+                <span className="text-[#7A7875]">Organizer:</span>
+                <strong className="text-[#1C1B1A] font-semibold">{credentialsModalInfo.name}</strong>
+              </div>
+              <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D5]">
+                <span className="text-[#7A7875]">Login Email:</span>
+                <span className="font-mono text-[#1C1B1A]">{credentialsModalInfo.email}</span>
+              </div>
+              <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D5]">
+                <span className="text-[#7A7875]">Authentication:</span>
+                <span className="font-medium text-[#1C1B1A]">
+                  {credentialsModalInfo.password ? (
+                    <span className="font-mono bg-white px-2 py-0.5 rounded border border-[#DDD7CB]">
+                      Password: {credentialsModalInfo.password}
+                    </span>
+                  ) : (
+                    'Google Sign-In ("Continue with Google")'
+                  )}
+                </span>
+              </div>
+              <div className="flex items-start justify-between pb-2 border-b border-[#E8E2D5]">
+                <span className="text-[#7A7875] shrink-0">Assigned Events:</span>
+                <span className="text-right font-medium text-[#1C1B1A] max-w-[260px]">
+                  {credentialsModalInfo.eventNames.length > 0
+                    ? credentialsModalInfo.eventNames.join(', ')
+                    : 'All assigned events (update anytime)'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[#7A7875]">Login URL:</span>
+                <span className="font-mono text-[11px] text-[#9E7D46] underline truncate max-w-[250px]">
+                  {window.location.origin}/login
+                </span>
+              </div>
+            </div>
+
+            {/* Quick copy actions */}
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <button
+                onClick={async () => {
+                  const portalUrl = `${window.location.origin}/login`;
+                  const inviteText = [
+                    `PaperDreams LUXE - Organizer Access`,
+                    `Hi ${credentialsModalInfo.name},`,
+                    ``,
+                    `You've been granted Organizer access to manage event photos and QR codes:`,
+                    `Events: ${credentialsModalInfo.eventNames.join(', ') || 'Assigned events'}`,
+                    ``,
+                    `Login Portal: ${portalUrl}`,
+                    `Login Email: ${credentialsModalInfo.email}`,
+                    credentialsModalInfo.password
+                      ? `Temporary Password: ${credentialsModalInfo.password}`
+                      : `Sign-in method: Click "Continue with Google" using this email address.`,
+                    ``,
+                    `Once logged in, you can review guest uploads in real-time and download the high-res QR code.`,
+                  ].join('\n');
+
+                  try {
+                    await navigator.clipboard.writeText(inviteText);
+                    setCopiedInvite(true);
+                    setTimeout(() => setCopiedInvite(false), 2500);
+                  } catch (e) {
+                    console.warn('Copy failed:', e);
+                  }
+                }}
+                className="w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl bg-[#1C1B1A] hover:bg-[#333230] text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+              >
+                {copiedInvite ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Copied Invitation to Clipboard!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4 text-[#D8C7A5]" />
+                    <span>Copy Full Invitation & Credentials</span>
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setCredentialsModalInfo(null);
+                  setCopiedInvite(false);
+                }}
+                className="w-full sm:w-auto py-3 px-5 rounded-xl bg-[#EBE5D8] hover:bg-[#E2DDD0] text-xs font-semibold text-[#1C1B1A] transition-colors cursor-pointer"
+              >
+                Done
               </button>
             </div>
           </div>

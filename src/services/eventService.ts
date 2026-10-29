@@ -37,6 +37,7 @@ export interface CreateEventParams {
   location: string;
   bannerUrl: string;
   organizerIds: string[];
+  organizerEmails?: string[];
   maxFilesPerGuest: number;
   maxFileSizeMb: number;
   allowedTypes: string[];
@@ -57,6 +58,7 @@ export async function createEvent(params: CreateEventParams): Promise<string> {
     bannerUrl: params.bannerUrl || DEFAULT_BANNERS[0],
     publicToken,
     organizerIds: params.organizerIds || [],
+    organizerEmails: params.organizerEmails || [],
     status: 'active',
     maxFilesPerGuest: params.maxFilesPerGuest || 30,
     maxFileSizeMb: params.maxFileSizeMb || 50,
@@ -153,23 +155,29 @@ export async function getEventById(eventId: string): Promise<EventItem | null> {
 export function subscribeEvents(
   userId: string,
   isAdmin: boolean,
-  callback: (events: EventItem[]) => void
+  callback: (events: EventItem[]) => void,
+  userEmail?: string
 ): () => void {
   const path = 'events';
-  let q;
-  if (isAdmin) {
-    q = query(collection(db, path));
-  } else {
-    q = query(collection(db, path), where('organizerIds', 'array-contains', userId));
-  }
+  const q = query(collection(db, path));
 
   return onSnapshot(
     q,
     (snapshot) => {
-      const events: EventItem[] = [];
+      let events: EventItem[] = [];
       snapshot.forEach((d) => {
         events.push({ ...(d.data() as EventItem), id: d.id });
       });
+
+      if (!isAdmin) {
+        const cleanEmail = userEmail?.trim().toLowerCase();
+        events = events.filter((ev) => {
+          const hasUid = Array.isArray(ev.organizerIds) && ev.organizerIds.includes(userId);
+          const hasEmail = cleanEmail && Array.isArray(ev.organizerEmails) && ev.organizerEmails.includes(cleanEmail);
+          return hasUid || hasEmail;
+        });
+      }
+
       // Sort newest first
       events.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callback(events);

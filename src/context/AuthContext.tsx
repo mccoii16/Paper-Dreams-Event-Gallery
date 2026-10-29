@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db, googleProvider, SUPERADMIN_EMAIL, testConnection } from '../firebase/config';
 import { initAppCheck } from '../firebase/appCheck';
 import { UserProfile, UserRole } from '../types';
@@ -61,6 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Check users collection
+      const cleanEmail = firebaseUser.email?.toLowerCase().trim() || '';
       const userRef = doc(db, 'users', firebaseUser.uid);
       const userSnap = await getDoc(userRef);
 
@@ -75,40 +76,81 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         setProfile({ ...data, uid: firebaseUser.uid });
       } else {
-        // Auto-provision Superadmin profile if matching email
-        const role: UserRole = isSuperAdminEmail ? 'superadmin' : 'organizer';
-        const newProfile: UserProfile = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          name: firebaseUser.displayName || (isSuperAdminEmail ? 'Super Admin' : 'Organizer'),
-          role,
-          status: 'active',
-          assignedEventIds: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-
-        if (isSuperAdminEmail) {
+        // Check if an organizer profile was pre-created by Super Admin with matching email
+        let preCreatedProfile: UserProfile | null = null;
+        if (cleanEmail) {
           try {
-            await setDoc(doc(db, 'admins', firebaseUser.uid), {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email,
-              establishedAt: new Date().toISOString(),
-              bootstrappedVia: 'client_superadmin_auth',
-            }, { merge: true });
-          } catch (admDocErr) {
-            console.warn('Admin doc creation notice:', admDocErr);
+            const orgQuery = query(collection(db, 'users'), where('email', '==', cleanEmail));
+            const orgSnap = await getDocs(orgQuery);
+            if (!orgSnap.empty) {
+              const matchedDoc = orgSnap.docs[0];
+              preCreatedProfile = matchedDoc.data() as UserProfile;
+            }
+          } catch (lookupErr) {
+            console.warn('Pre-created organizer lookup notice:', lookupErr);
           }
+        }
 
+        if (preCreatedProfile) {
+          if (preCreatedProfile.status === 'disabled') {
+            setError('This account has been disabled by the administrator.');
+            await signOut(auth);
+            setUser(null);
+            setProfile(null);
+            return;
+          }
+          const linkedProfile: UserProfile = {
+            ...preCreatedProfile,
+            uid: firebaseUser.uid,
+            name: preCreatedProfile.name || firebaseUser.displayName || 'Organizer',
+            email: cleanEmail,
+            role: 'organizer',
+            status: preCreatedProfile.status || 'active',
+            assignedEventIds: preCreatedProfile.assignedEventIds || [],
+            updatedAt: new Date().toISOString(),
+          };
           try {
-            await setDoc(userRef, newProfile, { merge: true });
-            setProfile(newProfile);
+            await setDoc(userRef, linkedProfile, { merge: true });
           } catch (writeErr) {
-            console.error('Error writing superadmin profile:', writeErr);
+            console.warn('Profile link write notice:', writeErr);
+          }
+          setProfile(linkedProfile);
+        } else {
+          // Auto-provision Superadmin profile if matching email
+          const role: UserRole = isSuperAdminEmail ? 'superadmin' : 'organizer';
+          const newProfile: UserProfile = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            name: firebaseUser.displayName || (isSuperAdminEmail ? 'Super Admin' : 'Organizer'),
+            role,
+            status: 'active',
+            assignedEventIds: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          if (isSuperAdminEmail) {
+            try {
+              await setDoc(doc(db, 'admins', firebaseUser.uid), {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                establishedAt: new Date().toISOString(),
+                bootstrappedVia: 'client_superadmin_auth',
+              }, { merge: true });
+            } catch (admDocErr) {
+              console.warn('Admin doc creation notice:', admDocErr);
+            }
+
+            try {
+              await setDoc(userRef, newProfile, { merge: true });
+              setProfile(newProfile);
+            } catch (writeErr) {
+              console.error('Error writing superadmin profile:', writeErr);
+              setProfile(newProfile);
+            }
+          } else {
             setProfile(newProfile);
           }
-        } else {
-          setProfile(newProfile);
         }
       }
     } catch (err) {

@@ -179,36 +179,27 @@ async function startServer() {
       const defaultPassword = password || `Luxe_${Math.random().toString(36).slice(-8)}!`;
       let organizerUid = `org_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-      // Attempt creation in Firebase Authentication if enabled/available
-      try {
-        const userRecord = await adminAuth.createUser({
-          email: cleanEmail,
-          displayName: cleanName,
-          password: defaultPassword,
-          emailVerified: true,
-        });
-        organizerUid = userRecord.uid;
-
+      // Attempt creation in Firebase Authentication if credentials available
+      if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
         try {
-          await adminAuth.setCustomUserClaims(organizerUid, {
-            role: 'organizer',
-            admin: false,
+          const userRecord = await adminAuth.createUser({
+            email: cleanEmail,
+            displayName: cleanName,
+            password: defaultPassword,
+            emailVerified: true,
           });
-        } catch {
-          // Handled via client-side authenticated firestore rules
-        }
-      } catch (authError: unknown) {
-        const errAny = authError as { code?: string; message?: string };
-        if (errAny.code === 'auth/email-already-exists') {
+          organizerUid = userRecord.uid;
+
           try {
-            const existingUser = await adminAuth.getUserByEmail(cleanEmail);
-            organizerUid = existingUser.uid;
+            await adminAuth.setCustomUserClaims(organizerUid, {
+              role: 'organizer',
+              admin: false,
+            });
           } catch {
-            // Keep generated organizerUid
+            // Handled via client-side authenticated firestore rules
           }
-        } else {
-          // Server ADC cross-project Identity Toolkit access unavailable in sandbox container
-          console.info('Identity Toolkit notice (using direct Firestore account profile management):', errAny?.message || 'Access deferred to database rules');
+        } catch {
+          // Fallback to client Firestore profile management
         }
       }
 
@@ -285,17 +276,18 @@ async function startServer() {
         return res.status(400).json({ error: 'Valid uid and status (active/disabled) required.' });
       }
 
-      // 1. Disable/Enable in Firebase Auth
-      await adminAuth.updateUser(uid, {
-        disabled: status === 'disabled',
-      }).catch((e: unknown) => console.warn('Auth disable note:', e));
+      // 1. Disable/Enable in Firebase Auth if available
+      if (process.env.GOOGLE_APPLICATION_CREDENTIALS && !uid.startsWith('org_')) {
+        await adminAuth.updateUser(uid, {
+          disabled: status === 'disabled',
+        }).catch(() => {});
 
-      // 2. Revoke user refresh tokens if disabled
-      if (status === 'disabled') {
-        await adminAuth.revokeRefreshTokens(uid).catch((e: unknown) => console.warn('Revoke tokens note:', e));
+        if (status === 'disabled') {
+          await adminAuth.revokeRefreshTokens(uid).catch(() => {});
+        }
       }
 
-      // 3. Update Firestore profile
+      // 2. Update Firestore profile
       await adminDb.collection('users').doc(uid).update({
         status,
         updatedAt: new Date().toISOString(),
@@ -315,8 +307,40 @@ async function startServer() {
       const { uid } = req.params;
       if (!uid) return res.status(400).json({ error: 'UID is required.' });
 
-      // Delete from Firebase Auth
-      await adminAuth.deleteUser(uid).catch((e: unknown) => console.warn('Delete auth user note:', e));
+      // Fetch user profile first to clean up event references
+      let userEmail = '';
+      let assignedEventIds: string[] = [];
+      try {
+        const userDoc = await adminDb.collection('users').doc(uid).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          userEmail = (userData?.email || '').trim().toLowerCase();
+          assignedEventIds = userData?.assignedEventIds || [];
+        }
+      } catch {
+        // Continue
+      }
+
+      // Delete from Firebase Auth if real auth account and credentials available
+      if (process.env.GOOGLE_APPLICATION_CREDENTIALS && !uid.startsWith('org_')) {
+        await adminAuth.deleteUser(uid).catch(() => {});
+      }
+
+      // Clean up event organizer references
+      for (const evId of assignedEventIds) {
+        try {
+          const updatePayload: Record<string, any> = {
+            organizerIds: FieldValue.arrayRemove(uid),
+            updatedAt: new Date().toISOString(),
+          };
+          if (userEmail) {
+            updatePayload.organizerEmails = FieldValue.arrayRemove(userEmail);
+          }
+          await adminDb.collection('events').doc(evId).update(updatePayload);
+        } catch {
+          // Ignore
+        }
+      }
 
       // Delete from Firestore
       await adminDb.collection('users').doc(uid).delete();

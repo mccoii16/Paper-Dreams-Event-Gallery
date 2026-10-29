@@ -43,9 +43,10 @@ service cloud.firestore {
     }
 
     function isAssignedOrganizer(eventData) {
-      return isSignedIn() &&
-        eventData.organizerIds is list &&
-        (request.auth.uid in eventData.organizerIds);
+      return isSignedIn() && (
+        (eventData.organizerIds is list && (request.auth.uid in eventData.organizerIds)) ||
+        (eventData.keys().hasAny(['organizerEmails']) && eventData.organizerEmails is list && request.auth.token.keys().hasAny(['email']) && (request.auth.token.email.lower() in eventData.organizerEmails))
+      );
     }
 
     function isValidUser(data) {
@@ -59,7 +60,7 @@ service cloud.firestore {
 
     function isValidEvent(data) {
       return data.keys().hasAll(['name', 'publicToken', 'status', 'maxFilesPerGuest', 'maxFileSizeMb', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'name', 'description', 'date', 'location', 'bannerUrl', 'publicToken', 'organizerIds', 'status', 'maxFilesPerGuest', 'maxFileSizeMb', 'allowedTypes', 'uploadsCount', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'description', 'date', 'location', 'bannerUrl', 'publicToken', 'organizerIds', 'organizerEmails', 'status', 'maxFilesPerGuest', 'maxFileSizeMb', 'allowedTypes', 'uploadsCount', 'createdBy', 'createdAt', 'updatedAt']) &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
         data.publicToken is string && data.publicToken.size() <= 64 && data.publicToken.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.status in ['active', 'disabled'] &&

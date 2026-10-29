@@ -63,6 +63,9 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
       setSubmitting(true);
       setError(null);
       const chosenBanner = customBanner.trim() ? customBanner.trim() : bannerUrl;
+      const selectedOrganizerEmails = organizers
+        .filter((o) => selectedOrganizers.includes(o.uid))
+        .map((o) => o.email.toLowerCase());
 
       const newId = await createEvent({
         name,
@@ -71,6 +74,7 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
         location,
         bannerUrl: chosenBanner,
         organizerIds: selectedOrganizers,
+        organizerEmails: selectedOrganizerEmails,
         maxFilesPerGuest,
         maxFileSizeMb,
         allowedTypes,
