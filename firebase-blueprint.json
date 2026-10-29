@@ -1,0 +1,226 @@
+{
+  "entities": {
+    "Admin": {
+      "title": "Admin Record",
+      "description": "Trusted administrative record identifying super administrators",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Admin email address"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Organizer or admin user profile",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["superadmin", "organizer"],
+          "description": "User role"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Display name"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "disabled"],
+          "description": "Account status"
+        },
+        "assignedEventIds": {
+          "type": "array",
+          "description": "List of assigned event IDs"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Update timestamp"
+        }
+      },
+      "required": ["email", "role", "name", "status", "createdAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Event containing guest upload settings, token, and metadata",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 150,
+          "minLength": 1,
+          "description": "Event name"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Event description and guest message"
+        },
+        "date": {
+          "type": "string",
+          "description": "Event date"
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Event venue or location"
+        },
+        "bannerUrl": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Public banner image URL"
+        },
+        "publicToken": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "maxLength": 64,
+          "description": "Unguessable token for guest upload route"
+        },
+        "organizerIds": {
+          "type": "array",
+          "description": "List of assigned organizer user IDs"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "disabled"],
+          "description": "Event upload availability status"
+        },
+        "maxFilesPerGuest": {
+          "type": "number",
+          "description": "Maximum number of files per guest upload session"
+        },
+        "maxFileSizeMb": {
+          "type": "number",
+          "description": "Maximum allowed file size in megabytes"
+        },
+        "allowedTypes": {
+          "type": "array",
+          "description": "Allowed media types (image, video)"
+        },
+        "uploadsCount": {
+          "type": "number",
+          "description": "Total completed uploads count"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "User ID of event creator"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Update timestamp"
+        }
+      },
+      "required": ["name", "publicToken", "status", "maxFilesPerGuest", "maxFileSizeMb", "createdAt"]
+    },
+    "Upload": {
+      "title": "Media Upload Record",
+      "description": "Metadata for guest photo or video upload",
+      "type": "object",
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Parent event document ID"
+        },
+        "publicToken": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Public event token"
+        },
+        "storagePath": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Path in Firebase Storage"
+        },
+        "downloadUrl": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Download or media preview URL"
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "Sanitized original file name"
+        },
+        "safeDisplayName": {
+          "type": "string",
+          "maxLength": 255,
+          "description": "Clean display title"
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": ["image", "video"],
+          "description": "Media classification"
+        },
+        "mimeType": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Standard MIME type"
+        },
+        "fileSize": {
+          "type": "number",
+          "description": "File size in bytes"
+        },
+        "uploaderSessionId": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Guest anonymous session token"
+        },
+        "guestName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Name or family name of the contributor who shared the media"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "processing"],
+          "description": "Upload processing status"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["eventId", "publicToken", "storagePath", "fileName", "mediaType", "fileSize", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": "#/entities/Admin",
+      "description": "Super admin identity document"
+    },
+    "/users/{userId}": {
+      "schema": "#/entities/User",
+      "description": "User profile with role and assignment list"
+    },
+    "/events/{eventId}": {
+      "schema": "#/entities/Event",
+      "description": "Events collection"
+    },
+    "/uploads/{uploadId}": {
+      "schema": "#/entities/Upload",
+      "description": "Media uploads collection"
+    }
+  }
+}

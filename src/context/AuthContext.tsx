@@ -1,0 +1,228 @@
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import {
+  User,
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, googleProvider, SUPERADMIN_EMAIL, testConnection } from '../firebase/config';
+import { initAppCheck } from '../firebase/appCheck';
+import { UserProfile, UserRole } from '../types';
+import { handleFirestoreError, OperationType } from '../firebase/errors';
+
+interface AuthContextType {
+  user: User | null;
+  profile: UserProfile | null;
+  isAdmin: boolean;
+  isOrganizer: boolean;
+  loading: boolean;
+  error: string | null;
+  loginWithGoogle: () => Promise<void>;
+  loginWithEmail: (email: string, pass: string) => Promise<void>;
+  logout: () => Promise<void>;
+  clearError: () => void;
+  refreshProfile: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    testConnection();
+    initAppCheck();
+  }, []);
+
+  const loadUserProfile = async (firebaseUser: User) => {
+    try {
+      const isSuperAdminEmail =
+        firebaseUser.email?.toLowerCase() === SUPERADMIN_EMAIL.toLowerCase();
+
+      // Invoke server-controlled bootstrap to set custom claims and establish /admins doc
+      if (isSuperAdminEmail) {
+        try {
+          const idToken = await firebaseUser.getIdToken();
+          await fetch('/api/admin/bootstrap', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${idToken}`,
+              'Content-Type': 'application/json',
+            },
+          });
+        } catch (e) {
+          console.warn('Server admin bootstrap endpoint note:', e);
+        }
+      }
+
+      // Check users collection
+      const userRef = doc(db, 'users', firebaseUser.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        const data = userSnap.data() as UserProfile;
+        if (data.status === 'disabled') {
+          setError('This account has been disabled by the administrator.');
+          await signOut(auth);
+          setUser(null);
+          setProfile(null);
+          return;
+        }
+        setProfile({ ...data, uid: firebaseUser.uid });
+      } else {
+        // Auto-provision Superadmin profile if matching email
+        const role: UserRole = isSuperAdminEmail ? 'superadmin' : 'organizer';
+        const newProfile: UserProfile = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          name: firebaseUser.displayName || (isSuperAdminEmail ? 'Super Admin' : 'Organizer'),
+          role,
+          status: 'active',
+          assignedEventIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (isSuperAdminEmail) {
+          try {
+            await setDoc(doc(db, 'admins', firebaseUser.uid), {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              establishedAt: new Date().toISOString(),
+              bootstrappedVia: 'client_superadmin_auth',
+            }, { merge: true });
+          } catch (admDocErr) {
+            console.warn('Admin doc creation notice:', admDocErr);
+          }
+
+          try {
+            await setDoc(userRef, newProfile, { merge: true });
+            setProfile(newProfile);
+          } catch (writeErr) {
+            console.error('Error writing superadmin profile:', writeErr);
+            setProfile(newProfile);
+          }
+        } else {
+          setProfile(newProfile);
+        }
+      }
+    } catch (err) {
+      console.error('Error loading user profile:', err);
+      // Fallback for super admin email
+      if (firebaseUser.email?.toLowerCase() === SUPERADMIN_EMAIL.toLowerCase()) {
+        setProfile({
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          name: firebaseUser.displayName || 'Super Admin',
+          role: 'superadmin',
+          status: 'active',
+          assignedEventIds: [],
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        await loadUserProfile(currentUser);
+      } else {
+        setProfile(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const loginWithGoogle = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+      const cred = await signInWithPopup(auth, googleProvider);
+      if (cred.user) {
+        await loadUserProfile(cred.user);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Google sign in failed.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginWithEmail = async (email: string, pass: string) => {
+    try {
+      setError(null);
+      setLoading(true);
+      const cred = await signInWithEmailAndPassword(auth, email, pass);
+      if (cred.user) {
+        await loadUserProfile(cred.user);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Login failed. Please check your credentials.';
+      setError(message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setProfile(null);
+      setError(null);
+    } catch (err: unknown) {
+      console.error('Error signing out:', err);
+    }
+  };
+
+  const refreshProfile = async () => {
+    if (auth.currentUser) {
+      await loadUserProfile(auth.currentUser);
+    }
+  };
+
+  const isAdmin =
+    Boolean(user && (user.email?.toLowerCase() === SUPERADMIN_EMAIL.toLowerCase() || profile?.role === 'superadmin'));
+
+  const isOrganizer =
+    Boolean(user && (profile?.role === 'organizer' || isAdmin));
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        isAdmin,
+        isOrganizer,
+        loading,
+        error,
+        loginWithGoogle,
+        loginWithEmail,
+        logout,
+        clearError: () => setError(null),
+        refreshProfile,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

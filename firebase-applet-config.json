@@ -1,0 +1,12 @@
+{
+  "projectId": "pd-event-gallery",
+  "appId": "1:310612292321:web:a91710b6dbf2a763313da0",
+  "apiKey": "AIzaSyAf_dAmWBJZyTRV26htSPq-eQPaVvXT0rY",
+  "authDomain": "pd-event-gallery.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-5e4539de-3546-4405-85fd-6035d5104711",
+  "storageBucket": "pd-event-gallery.firebasestorage.app",
+  "messagingSenderId": "310612292321",
+  "measurementId": "",
+  "oAuthClientId": "310612292321-6ddo02lr59d499aq7hv5mlmardq4qd28.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

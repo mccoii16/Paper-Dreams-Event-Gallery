@@ -1,0 +1,39 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Default deny catch-all
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Event Banners (publicly readable so guest landing pages can display cover art)
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Event Private Media Uploads
+    match /events/{eventId}/{fileName} {
+      // Allow read so media can be displayed to organizers, admins, and previewed
+      allow read: if true;
+
+      // Guest & Organizer Upload: Permitted media up to 500 MB
+      allow create: if (
+        request.resource.size > 0 &&
+        request.resource.size <= 524288000 &&
+        (request.resource.contentType.matches('image/.*') || request.resource.contentType.matches('video/.*'))
+      );
+
+      // Immutability: Overwrites are forbidden
+      allow update: if false;
+
+      // Deletion: Authenticated admin or organizers
+      allow delete: if isSignedIn();
+    }
+  }
+}

@@ -1,0 +1,150 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Bootstrapped Super Admin from runtime email and verified email check
+    function isBootstrappedAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email.lower() == 'martiligando@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() && (
+          (request.auth.token.keys().hasAny(['admin', 'role']) && (request.auth.token.admin == true || request.auth.token.role == 'superadmin')) ||
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        )
+      );
+    }
+
+    function isAssignedOrganizer(eventData) {
+      return isSignedIn() &&
+        eventData.organizerIds is list &&
+        (request.auth.uid in eventData.organizerIds);
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'name', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'role', 'name', 'status', 'assignedEventIds', 'createdAt', 'updatedAt']) &&
+        data.email is string && data.email.size() <= 255 &&
+        data.role in ['superadmin', 'organizer'] &&
+        data.name is string && data.name.size() <= 100 &&
+        data.status in ['active', 'disabled'];
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['name', 'publicToken', 'status', 'maxFilesPerGuest', 'maxFileSizeMb', 'createdAt']) &&
+        data.keys().hasOnly(['name', 'description', 'date', 'location', 'bannerUrl', 'publicToken', 'organizerIds', 'status', 'maxFilesPerGuest', 'maxFileSizeMb', 'allowedTypes', 'uploadsCount', 'createdBy', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+        data.publicToken is string && data.publicToken.size() <= 64 && data.publicToken.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.status in ['active', 'disabled'] &&
+        data.maxFilesPerGuest is number && data.maxFilesPerGuest >= 1 && data.maxFilesPerGuest <= 200 &&
+        data.maxFileSizeMb is number && data.maxFileSizeMb >= 1 && data.maxFileSizeMb <= 500;
+    }
+
+    function isOrganizerEventUpdate() {
+      return incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'date', 'location', 'bannerUrl', 'updatedAt']);
+    }
+
+    function isValidUpload(data) {
+      return data.keys().hasAll(['eventId', 'publicToken', 'storagePath', 'fileName', 'mediaType', 'fileSize', 'createdAt']) &&
+        data.keys().hasOnly(['eventId', 'publicToken', 'storagePath', 'downloadUrl', 'fileName', 'safeDisplayName', 'mediaType', 'mimeType', 'fileSize', 'uploaderSessionId', 'status', 'createdAt']) &&
+        data.eventId is string && data.eventId.size() <= 128 && data.eventId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.publicToken is string && data.publicToken.size() <= 64 && data.publicToken.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.storagePath is string && data.storagePath.size() <= 500 &&
+        data.fileName is string && data.fileName.size() <= 255 &&
+        data.mediaType in ['image', 'video'] &&
+        data.fileSize is number && data.fileSize > 0 && data.fileSize <= 524288000;
+    }
+
+    // 1. /admins collection: holds super admin UIDs
+    match /admins/{adminId} {
+      allow get, list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // 2. /users collection:
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isSignedIn() && request.auth.uid == userId));
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && (
+        isAdmin() || (
+          isSignedIn() &&
+          request.auth.uid == userId &&
+          isValidUser(incoming()) &&
+          (incoming().role == 'organizer' || isBootstrappedAdmin())
+        )
+      );
+      allow update: if isValidId(userId) && isValidUser(incoming()) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'updatedAt']))
+      );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 3. /events collection:
+    match /events/{eventId} {
+      allow get: if isValidId(eventId) && (
+        isAdmin() ||
+        isAssignedOrganizer(resource.data) ||
+        resource.data.status == 'active'
+      );
+      allow list: if isAdmin() ||
+        isAssignedOrganizer(resource.data) ||
+        resource.data.status == 'active';
+      allow create: if isValidId(eventId) && isAdmin() && isValidEvent(incoming());
+      allow update: if isValidId(eventId) && isValidEvent(incoming()) && (
+        isAdmin() ||
+        (isAssignedOrganizer(resource.data) && isOrganizerEventUpdate())
+      );
+      allow delete: if isValidId(eventId) && isAdmin();
+    }
+
+    // 4. /uploads collection:
+    match /uploads/{uploadId} {
+      allow get, list: if isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/events/$(resource.data.eventId)) &&
+        isAssignedOrganizer(get(/databases/$(database)/documents/events/$(resource.data.eventId)).data)
+      );
+
+      allow create: if isValidId(uploadId) &&
+        isValidUpload(incoming()) &&
+        exists(/databases/$(database)/documents/events/$(incoming().eventId)) &&
+        get(/databases/$(database)/documents/events/$(incoming().eventId)).data.status == 'active' &&
+        get(/databases/$(database)/documents/events/$(incoming().eventId)).data.publicToken == incoming().publicToken;
+
+      allow update: if false;
+
+      allow delete: if isValidId(uploadId) && (
+        isAdmin() || (
+          isSignedIn() &&
+          exists(/databases/$(database)/documents/events/$(resource.data.eventId)) &&
+          isAssignedOrganizer(get(/databases/$(database)/documents/events/$(resource.data.eventId)).data)
+        )
+      );
+    }
+  }
+}

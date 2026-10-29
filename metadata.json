@@ -1,0 +1,6 @@
+{
+  "name": "PaperDreams LUXE - Event Media Drop",
+  "description": "Private, high-fidelity event photo & video collection with zero-friction guest uploads and strict organizer access control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
