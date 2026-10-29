@@ -10,6 +10,8 @@ export interface UserProfile {
   role: UserRole;
   status: UserStatus;
   assignedEventIds: string[];
+  initialPassword?: string;
+  authMethod?: 'password' | 'google';
   createdAt: string;
   updatedAt?: string;
 }

@@ -289,8 +289,18 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
                       >
                         {org.status}
                       </span>
+                      {org.initialPassword || org.authMethod === 'password' ? (
+                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                          <Key className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Password Access</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                          <span>Google Sign-In</span>
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-[#7A7875]">{org.email}</div>
+                    <div className="text-xs text-[#7A7875] mt-0.5">{org.email}</div>
 
                     {/* Assigned events badges */}
                     <div className="flex flex-wrap items-center gap-1.5 mt-2">
@@ -323,6 +333,7 @@ export const OrganizerManagementPage: React.FC<OrganizerManagementPageProps> = (
                       setCredentialsModalInfo({
                         name: org.name,
                         email: org.email,
+                        password: org.initialPassword,
                         eventNames: assignedNames,
                       });
                     }}

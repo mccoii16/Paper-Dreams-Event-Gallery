@@ -11,7 +11,9 @@ import {
   arrayUnion,
   arrayRemove,
 } from 'firebase/firestore';
-import { db, auth } from '../firebase/config';
+import { initializeApp as initSecondaryApp, getApps as getClientApps, getApp as getClientApp } from 'firebase/app';
+import { getAuth as getSecondaryAuth, createUserWithEmailAndPassword, signOut as secondarySignOut } from 'firebase/auth';
+import { db, auth, resolvedFirebaseConfig } from '../firebase/config';
 import { UserProfile, UserStatus } from '../types';
 import { handleFirestoreError, OperationType } from '../firebase/errors';
 
@@ -85,6 +87,34 @@ export async function createOrganizer(params: CreateOrganizerParams): Promise<Us
     console.info('Server API create-organizer notice, persisting via client Firestore:', apiErr);
   }
 
+  const cleanPassword = params.password?.trim() || '';
+
+  // Client-side Firebase Auth account provisioning if password provided
+  if (cleanPassword) {
+    try {
+      let secondaryApp;
+      const appName = 'PaperDreamsSecondaryProvisioner';
+      if (getClientApps().some((a) => a.name === appName)) {
+        secondaryApp = getClientApp(appName);
+      } else {
+        secondaryApp = initSecondaryApp(resolvedFirebaseConfig, appName);
+      }
+      const secondaryAuth = getSecondaryAuth(secondaryApp);
+      const userCred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, cleanPassword);
+      if (userCred.user?.uid) {
+        assignedUid = userCred.user.uid;
+      }
+      await secondarySignOut(secondaryAuth);
+    } catch (authErr: unknown) {
+      const errCode = (authErr as { code?: string })?.code;
+      if (errCode === 'auth/email-already-in-use') {
+        console.info('Email already registered in Firebase Auth; linking profile directly.');
+      } else {
+        console.warn('Firebase Auth user creation notice:', authErr);
+      }
+    }
+  }
+
   // Client-side persistence: super admin creates organizer profile in Firestore
   const profile: UserProfile = {
     uid: assignedUid,
@@ -93,6 +123,8 @@ export async function createOrganizer(params: CreateOrganizerParams): Promise<Us
     role: 'organizer',
     status: 'active',
     assignedEventIds: eventIds,
+    initialPassword: cleanPassword || undefined,
+    authMethod: cleanPassword ? 'password' : 'google',
     createdAt: now,
     updatedAt: now,
   };

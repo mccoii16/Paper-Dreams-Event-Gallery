@@ -218,9 +218,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await loadUserProfile(cred.user);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Login failed. Please check your credentials.';
+      const code = (err as { code?: string })?.code;
+      let message = err instanceof Error ? err.message : 'Login failed. Please check your credentials.';
+      if (code === 'auth/operation-not-allowed') {
+        message = 'Email/Password sign-in is not enabled in Firebase Console. Please enable "Email/Password" in Firebase Console > Authentication > Sign-in method.';
+      } else if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
+        message = 'Invalid email or password. Please verify the credentials with your Super Admin.';
+      }
       setError(message);
-      throw err;
+      throw new Error(message);
     } finally {
       setLoading(false);
     }

@@ -15,6 +15,7 @@ const resolvedConfig = {
   firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId,
 };
 
+export const resolvedFirebaseConfig = resolvedConfig;
 export const app = !getApps().length ? initializeApp(resolvedConfig) : getApp();
 export const db = getFirestore(app, resolvedConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
