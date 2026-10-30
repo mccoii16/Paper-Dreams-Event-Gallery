@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Camera, ShieldCheck, Users, Plus, LogOut, Calendar } from 'lucide-react';
+import { ShieldCheck, Users, Plus, LogOut, Calendar } from 'lucide-react';
 
 interface NavbarProps {
   currentPath: string;
@@ -16,11 +16,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <button
             onClick={() => onNavigate('/login')}
-            className="flex items-center space-x-2 text-left"
+            className="flex items-center space-x-2.5 text-left group"
           >
-            <div className="w-8 h-8 rounded-lg bg-[#1C1B1A] flex items-center justify-center text-[#FAF9F5] shadow-xs">
-              <Camera className="w-4 h-4 text-[#D8C7A5]" />
-            </div>
+            <img
+              src="/assets/aistudio/logo2_606d60c8.png"
+              alt="PaperDreams Logo"
+              className="w-9 h-9 object-contain rounded-full shadow-xs group-hover:scale-105 transition-transform"
+            />
             <div>
               <span className="text-base font-serif font-bold tracking-tight text-[#1C1B1A]">
                 PaperDreams
@@ -51,9 +53,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, onNavigate }) => {
             onClick={() => onNavigate(isAdmin ? '/admin' : '/organizer')}
             className="flex items-center space-x-2.5 text-left group"
           >
-            <div className="w-8 h-8 rounded-lg bg-[#1C1B1A] flex items-center justify-center text-[#FAF9F5] shadow-xs group-hover:scale-105 transition-transform">
-              <Camera className="w-4 h-4 text-[#D8C7A5]" />
-            </div>
+            <img
+              src="/assets/aistudio/logo2_606d60c8.png"
+              alt="PaperDreams Logo"
+              className="w-9 h-9 object-contain rounded-full shadow-xs group-hover:scale-105 transition-transform"
+            />
             <div>
               <div className="flex items-center space-x-1.5">
                 <span className="text-base font-serif font-bold tracking-tight text-[#1C1B1A]">

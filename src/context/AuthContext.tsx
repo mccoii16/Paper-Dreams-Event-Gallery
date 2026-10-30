@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db, googleProvider, SUPERADMIN_EMAIL, testConnection } from '../firebase/config';
 import { initAppCheck } from '../firebase/appCheck';
 import { UserProfile, UserRole } from '../types';
@@ -116,6 +116,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      // Check events where organizerEmails contains cleanEmail
+      let emailAssignedEventIds: string[] = [];
+      if (cleanEmail) {
+        try {
+          const evQuery = query(collection(db, 'events'), where('organizerEmails', 'array-contains', cleanEmail));
+          const evSnap = await getDocs(evQuery);
+          for (const evDoc of evSnap.docs) {
+            emailAssignedEventIds.push(evDoc.id);
+            const evData = evDoc.data();
+            const orgIds: string[] = Array.isArray(evData.organizerIds) ? evData.organizerIds : [];
+            if (!orgIds.includes(firebaseUser.uid)) {
+              updateDoc(doc(db, 'events', evDoc.id), {
+                organizerIds: arrayUnion(firebaseUser.uid),
+                updatedAt: new Date().toISOString(),
+              }).catch(() => {});
+            }
+          }
+        } catch {
+          // Handled safely
+        }
+      }
+
       if (userSnap.exists()) {
         const data = userSnap.data() as UserProfile;
         if (data.status === 'disabled') {
@@ -126,9 +148,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Merge any pre-created event assignments if current profile is missing them
+        // Merge any pre-created event assignments & email assignments if current profile is missing them
         const mergedEventIds = Array.from(
-          new Set([...(data.assignedEventIds || []), ...(preCreatedProfile?.assignedEventIds || [])])
+          new Set([
+            ...(data.assignedEventIds || []),
+            ...(preCreatedProfile?.assignedEventIds || []),
+            ...emailAssignedEventIds,
+          ])
         );
 
         const updatedProfile: UserProfile = {
@@ -162,7 +188,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             email: cleanEmail,
             role: 'organizer',
             status: preCreatedProfile.status || 'active',
-            assignedEventIds: preCreatedProfile.assignedEventIds || [],
+            assignedEventIds: Array.from(new Set([...(preCreatedProfile.assignedEventIds || []), ...emailAssignedEventIds])),
             updatedAt: new Date().toISOString(),
           };
           try {
@@ -180,7 +206,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             name: firebaseUser.displayName || (isSuperAdminEmail ? 'Super Admin' : 'Organizer'),
             role,
             status: 'active',
-            assignedEventIds: [],
+            assignedEventIds: emailAssignedEventIds,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };

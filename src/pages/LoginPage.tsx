@@ -60,9 +60,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
 
         {/* Brand Header */}
         <div className="text-center mb-8">
-          <div className="w-13 h-13 mx-auto mb-3.5 rounded-2xl bg-[#1C1B1A] flex items-center justify-center text-[#FAF9F5] shadow-md">
-            <Camera className="w-6 h-6 text-[#D8C7A5]" />
-          </div>
+          <img
+            src="/assets/aistudio/logo2_606d60c8.png"
+            alt="PaperDreams Logo"
+            className="w-16 h-16 mx-auto mb-3.5 object-contain rounded-full shadow-md hover:scale-105 transition-transform"
+          />
           <h2 className="text-2xl font-serif font-bold text-[#1C1B1A] tracking-tight">
             PaperDreams LUXE
           </h2>
