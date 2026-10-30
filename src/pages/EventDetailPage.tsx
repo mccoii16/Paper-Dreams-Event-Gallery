@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Calendar,
   MapPin,
@@ -18,6 +18,7 @@ import {
   Video,
   Plus,
   Image as ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EventItem, UploadItem } from '../types';
@@ -28,6 +29,7 @@ import {
   subscribeEventUploads,
   deleteUpload,
   uploadGuestMedia,
+  uploadEventBanner,
   DEFAULT_BANNERS,
 } from '../services/eventService';
 import { QRCodeModal } from '../components/QRCodeModal';
@@ -84,6 +86,8 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({ eventId, onNav
   const [editMaxFiles, setEditMaxFiles] = useState(30);
   const [editMaxSize, setEditMaxSize] = useState(50);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const bannerFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let unsubUploads: (() => void) | undefined;
@@ -189,6 +193,28 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({ eventId, onNav
       alert(err instanceof Error ? err.message : 'Could not save event changes.');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const handleEditBannerFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (JPG, PNG, WebP) for the banner.');
+      return;
+    }
+
+    try {
+      setUploadingBanner(true);
+      const url = await uploadEventBanner(file, event?.id || 'banners');
+      setEditBanner(url);
+    } catch (err: unknown) {
+      console.error('Failed to upload banner:', err);
+      alert(err instanceof Error ? err.message : 'Could not upload banner photo.');
+    } finally {
+      setUploadingBanner(false);
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = '';
     }
   };
 
@@ -775,13 +801,53 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({ eventId, onNav
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#4A4947] mb-1">
-                  Banner Image URL
+                <label className="block text-xs font-semibold text-[#4A4947] mb-1.5">
+                  Event Cover Banner
                 </label>
+                {editBanner && (
+                  <div className="relative h-28 w-full rounded-xl overflow-hidden mb-2.5 bg-[#E8E3D8] border border-[#DDD7CB]">
+                    <img
+                      src={editBanner}
+                      alt="Banner Preview"
+                      className="w-full h-full object-cover"
+                    />
+                    {uploadingBanner && (
+                      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center text-white space-x-2 text-xs font-semibold">
+                        <Loader2 className="w-4 h-4 animate-spin text-[#D8C7A5]" />
+                        <span>Uploading...</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <input
+                  ref={bannerFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleEditBannerFileChange}
+                  className="hidden"
+                />
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-2">
+                  <button
+                    type="button"
+                    disabled={uploadingBanner}
+                    onClick={() => bannerFileInputRef.current?.click()}
+                    className="inline-flex items-center justify-center space-x-2 px-3.5 py-2 rounded-xl bg-[#1C1B1A] hover:bg-[#333230] text-white text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 shadow-xs"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5 text-[#D8C7A5]" />
+                    <span>{uploadingBanner ? 'Uploading Photo...' : 'Upload Cover Photo'}</span>
+                  </button>
+                  <span className="text-[11px] text-[#8C8983]">
+                    Or edit the image URL directly:
+                  </span>
+                </div>
+
                 <input
                   type="url"
                   value={editBanner}
                   onChange={(e) => setEditBanner(e.target.value)}
+                  placeholder="https://example.com/cover.jpg"
                   className="w-full px-3.5 py-2 bg-[#FAF9F5] border border-[#DDD7CB] focus:border-[#1C1B1A] rounded-xl text-xs text-[#1C1B1A] outline-none"
                 />
               </div>

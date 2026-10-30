@@ -68,9 +68,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
           <h2 className="text-2xl font-serif font-bold text-[#1C1B1A] tracking-tight">
             PaperDreams LUXE
           </h2>
-          <p className="text-xs text-[#7A7875] mt-1 uppercase tracking-widest font-medium">
-            Administrative & Organizer Portal
-          </p>
         </div>
 
         {/* Security Notice */}
@@ -169,19 +166,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
             <ArrowRight className="w-3.5 h-3.5 text-[#1C1B1A]" />
           </button>
         </form>
-
-        <div className="mt-8 pt-6 border-t border-[#F0EBE0] text-center space-y-3">
-          <a
-            href="/e/demo"
-            className="inline-flex items-center space-x-1.5 text-xs font-semibold text-[#9E7D46] hover:text-[#846231] hover:underline"
-          >
-            <span>Experience Guest Upload Flow (/e/demo)</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </a>
-          <p className="text-[11px] text-[#8C8983] leading-relaxed">
-            Only administrators can provision organizer accounts. Public self-registration is strictly disabled by security policy.
-          </p>
-        </div>
       </div>
     </div>
   );

@@ -64,3 +64,13 @@ export interface QueuedUploadFile {
   status: 'idle' | 'uploading' | 'success' | 'error';
   errorMessage?: string;
 }
+
+export const INFINITE_FILES_VAL = 1000000;
+export const MAX_FILES_OPTIONS = [0, 50, 100, 200, 300, 400, 500, INFINITE_FILES_VAL] as const;
+
+export function formatMaxFiles(limit: number): string {
+  if (limit === undefined || limit === null) return '100';
+  if (limit >= INFINITE_FILES_VAL) return '∞';
+  return String(limit);
+}
+

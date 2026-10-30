@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar,
   MapPin,
@@ -9,9 +9,11 @@ import {
   Check,
   AlertCircle,
   Sparkles,
+  UploadCloud,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { createEvent, DEFAULT_BANNERS } from '../services/eventService';
+import { createEvent, DEFAULT_BANNERS, uploadEventBanner } from '../services/eventService';
 import { fetchOrganizers } from '../services/userService';
 import { UserProfile } from '../types';
 
@@ -27,6 +29,9 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
   const [location, setLocation] = useState('');
   const [bannerUrl, setBannerUrl] = useState(DEFAULT_BANNERS[0]);
   const [customBanner, setCustomBanner] = useState('');
+  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [bannerUploadProgress, setBannerUploadProgress] = useState<number | null>(null);
+  const bannerFileInputRef = useRef<HTMLInputElement>(null);
   const [maxFilesPerGuest, setMaxFilesPerGuest] = useState(30);
   const [maxFileSizeMb, setMaxFileSizeMb] = useState(50);
   const [allowImages, setAllowImages] = useState(true);
@@ -42,6 +47,32 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
       .then((data) => setOrganizers(data))
       .catch((e) => console.warn('Could not fetch organizers list:', e));
   }, []);
+
+  const handleBannerFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setError('Please select a valid image file (JPG, PNG, WebP) for the banner.');
+      return;
+    }
+
+    try {
+      setUploadingBanner(true);
+      setBannerUploadProgress(10);
+      setError(null);
+      const url = await uploadEventBanner(file, 'banners', (p) => setBannerUploadProgress(p));
+      setCustomBanner(url);
+      setBannerUrl(url);
+    } catch (err: unknown) {
+      console.error('Banner upload error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to upload event banner.');
+    } finally {
+      setUploadingBanner(false);
+      setBannerUploadProgress(null);
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = '';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,6 +238,14 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
               alt="Banner Preview"
               className="w-full h-full object-cover"
             />
+            {uploadingBanner && (
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center text-white space-y-2">
+                <Loader2 className="w-6 h-6 animate-spin text-[#D8C7A5]" />
+                <span className="text-xs font-semibold">
+                  Uploading Cover Photo {bannerUploadProgress ? `(${bannerUploadProgress}%)` : ''}...
+                </span>
+              </div>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4 text-white">
               <span className="text-xs font-medium bg-black/40 backdrop-blur-xs px-2.5 py-1 rounded-md">
                 Live Banner Preview
@@ -215,7 +254,7 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
           </div>
 
           {/* Preset Banners Grid */}
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-4">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-5">
             {DEFAULT_BANNERS.map((url, i) => (
               <button
                 type="button"
@@ -240,18 +279,63 @@ export const EventCreatePage: React.FC<EventCreatePageProps> = ({ onNavigate }) 
             ))}
           </div>
 
-          {/* Custom Banner URL */}
-          <div>
-            <label className="block text-xs font-semibold text-[#4A4947] mb-1">
-              Or provide a Custom Image URL
-            </label>
-            <input
-              type="url"
-              value={customBanner}
-              onChange={(e) => setCustomBanner(e.target.value)}
-              placeholder="https://example.com/cover.jpg"
-              className="w-full px-3.5 py-2 bg-[#FAF9F5] border border-[#DDD7CB] focus:border-[#1C1B1A] rounded-xl text-xs text-[#1C1B1A] outline-none"
-            />
+          {/* Upload Banner & Custom URL Options */}
+          <div className="space-y-3.5 pt-3 border-t border-[#F0EBE0]">
+            <div>
+              <label className="block text-xs font-semibold text-[#4A4947] mb-1.5">
+                Upload Cover Photo from Device
+              </label>
+              <input
+                ref={bannerFileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleBannerFileChange}
+                className="hidden"
+              />
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+                <button
+                  type="button"
+                  disabled={uploadingBanner}
+                  onClick={() => bannerFileInputRef.current?.click()}
+                  className="inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-[#1C1B1A] hover:bg-[#333230] text-white text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 shadow-xs"
+                >
+                  <UploadCloud className="w-4 h-4 text-[#D8C7A5]" />
+                  <span>
+                    {uploadingBanner
+                      ? `Uploading Photo (${bannerUploadProgress || 0}%)...`
+                      : 'Choose Photo from Device'}
+                  </span>
+                </button>
+                {customBanner && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomBanner('');
+                      setBannerUrl(DEFAULT_BANNERS[0]);
+                    }}
+                    className="text-xs text-[#9E7D46] hover:text-[#846231] font-medium px-2 py-1 underline cursor-pointer"
+                  >
+                    Reset to Default Banner
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-[#8C8983] mt-1.5">
+                Supports JPG, PNG, or WebP. The photo will be automatically saved and displayed as the event's header.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#4A4947] mb-1">
+                Or paste a Custom Image URL
+              </label>
+              <input
+                type="url"
+                value={customBanner}
+                onChange={(e) => setCustomBanner(e.target.value)}
+                placeholder="https://example.com/cover.jpg"
+                className="w-full px-3.5 py-2 bg-[#FAF9F5] border border-[#DDD7CB] focus:border-[#1C1B1A] rounded-xl text-xs text-[#1C1B1A] outline-none"
+              />
+            </div>
           </div>
         </div>
 

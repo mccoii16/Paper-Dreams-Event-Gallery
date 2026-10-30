@@ -79,7 +79,7 @@ export const GuestEventPage: React.FC<GuestEventPageProps> = ({ publicToken }) =
             publicToken: 'demo',
             organizerIds: [],
             status: 'active',
-            maxFilesPerGuest: 30,
+            maxFilesPerGuest: 100,
             maxFileSizeMb: 50,
             allowedTypes: ['image', 'video'],
             uploadsCount: 14,

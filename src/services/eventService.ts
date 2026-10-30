@@ -60,7 +60,7 @@ export async function createEvent(params: CreateEventParams): Promise<string> {
     organizerIds: params.organizerIds || [],
     organizerEmails: params.organizerEmails || [],
     status: 'active',
-    maxFilesPerGuest: params.maxFilesPerGuest || 30,
+    maxFilesPerGuest: params.maxFilesPerGuest !== undefined ? params.maxFilesPerGuest : 100,
     maxFileSizeMb: params.maxFileSizeMb || 50,
     allowedTypes: params.allowedTypes?.length ? params.allowedTypes : ['image', 'video'],
     uploadsCount: 0,
@@ -361,6 +361,59 @@ export interface UploadGuestFileParams {
   uploaderSessionId: string;
   guestName?: string;
   onProgress?: (percent: number) => void;
+}
+
+export async function uploadEventBanner(
+  file: File,
+  eventId: string = 'banners',
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please select a valid image file (JPEG, PNG, WebP) for the banner.');
+  }
+
+  const safeName = sanitizeFileName(file.name);
+  const uploadId = generateUnguessableToken(16);
+  const timestamp = Date.now();
+  const storagePath = `banners/${timestamp}_${uploadId}_${safeName}`;
+
+  try {
+    const storageRef = ref(storage, storagePath);
+    const uploadTask = uploadBytesResumable(storageRef, file, {
+      contentType: file.type,
+      customMetadata: {
+        type: 'banner',
+        eventId,
+      },
+    });
+
+    return await new Promise<string>((resolve, reject) => {
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+          onProgress?.(progress);
+        },
+        (error) => {
+          reject(error);
+        },
+        async () => {
+          try {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            resolve(url);
+          } catch {
+            const bucketName = storage.app.options.storageBucket || 'pd-event-gallery.firebasestorage.app';
+            resolve(`https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodeURIComponent(storagePath)}?alt=media`);
+          }
+        }
+      );
+    });
+  } catch (storageError) {
+    console.warn('Direct banner upload to storage failed, falling back to server fallback:', storageError);
+    const fallbackUrl = await uploadMediaViaServerFallback(eventId, `${timestamp}_${uploadId}`, safeName, file, 'Organizer Banner');
+    onProgress?.(100);
+    return fallbackUrl;
+  }
 }
 
 export async function uploadMediaViaServerFallback(

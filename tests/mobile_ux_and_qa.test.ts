@@ -118,3 +118,23 @@ test('GUEST ATTRIBUTION: Upload record accommodates guestName within rules chara
   assert.ok(sampleUploadWithGuest.guestName.length <= 120);
   assert.equal(sampleUploadWithGuest.guestName, 'The Miller Family');
 });
+
+test('BANNER UPLOAD: uploadEventBanner rejects non-image files and validates image input', async () => {
+  const { uploadEventBanner } = await import('../src/services/eventService');
+  const invalidFile = {
+    name: 'document.pdf',
+    type: 'application/pdf',
+    size: 1024,
+  } as unknown as File;
+
+  await assert.rejects(
+    async () => {
+      await uploadEventBanner(invalidFile, 'test_event');
+    },
+    {
+      message: /Please select a valid image file/,
+    }
+  );
+});
+
+

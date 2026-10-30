@@ -67,7 +67,7 @@ service cloud.firestore {
         data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
         data.publicToken is string && data.publicToken.size() <= 64 && data.publicToken.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.status in ['active', 'disabled'] &&
-        data.maxFilesPerGuest is number && data.maxFilesPerGuest >= 1 && data.maxFilesPerGuest <= 200 &&
+        data.maxFilesPerGuest is number && data.maxFilesPerGuest >= 0 && data.maxFilesPerGuest <= 1000000 &&
         data.maxFileSizeMb is number && data.maxFileSizeMb >= 1 && data.maxFileSizeMb <= 500;
     }
 
