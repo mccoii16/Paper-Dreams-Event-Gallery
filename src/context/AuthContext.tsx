@@ -60,10 +60,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      // Invoke server-controlled sync to associate any pre-created events or profile
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        const syncRes = await fetch('/api/organizer/sync', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          if (syncData.profile) {
+            if (syncData.profile.status === 'disabled') {
+              setError('This account has been disabled by the administrator.');
+              await signOut(auth);
+              setUser(null);
+              setProfile(null);
+              return;
+            }
+            setProfile(syncData.profile);
+            return;
+          }
+        }
+      } catch (syncErr) {
+        console.warn('API sync endpoint notice, proceeding to client Firestore resolution:', syncErr);
+      }
+
       // Check users collection
       const cleanEmail = firebaseUser.email?.toLowerCase().trim() || '';
       const userRef = doc(db, 'users', firebaseUser.uid);
       const userSnap = await getDoc(userRef);
+
+      // Check if an organizer profile was pre-created by Super Admin with matching email
+      let preCreatedProfile: UserProfile | null = null;
+      if (cleanEmail) {
+        try {
+          const orgQuery = query(collection(db, 'users'), where('email', '==', cleanEmail));
+          const orgSnap = await getDocs(orgQuery);
+          for (const d of orgSnap.docs) {
+            if (d.id !== firebaseUser.uid) {
+              const dData = d.data() as UserProfile;
+              if (!preCreatedProfile) {
+                preCreatedProfile = dData;
+              } else if (Array.isArray(dData.assignedEventIds)) {
+                preCreatedProfile.assignedEventIds = Array.from(
+                  new Set([...(preCreatedProfile.assignedEventIds || []), ...dData.assignedEventIds])
+                );
+              }
+            }
+          }
+        } catch (lookupErr) {
+          console.warn('Pre-created organizer lookup notice:', lookupErr);
+        }
+      }
 
       if (userSnap.exists()) {
         const data = userSnap.data() as UserProfile;
@@ -74,23 +125,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setProfile(null);
           return;
         }
-        setProfile({ ...data, uid: firebaseUser.uid });
-      } else {
-        // Check if an organizer profile was pre-created by Super Admin with matching email
-        let preCreatedProfile: UserProfile | null = null;
-        if (cleanEmail) {
+
+        // Merge any pre-created event assignments if current profile is missing them
+        const mergedEventIds = Array.from(
+          new Set([...(data.assignedEventIds || []), ...(preCreatedProfile?.assignedEventIds || [])])
+        );
+
+        const updatedProfile: UserProfile = {
+          ...data,
+          uid: firebaseUser.uid,
+          assignedEventIds: mergedEventIds,
+          updatedAt: new Date().toISOString(),
+        };
+
+        if (mergedEventIds.length !== (data.assignedEventIds?.length || 0)) {
           try {
-            const orgQuery = query(collection(db, 'users'), where('email', '==', cleanEmail));
-            const orgSnap = await getDocs(orgQuery);
-            if (!orgSnap.empty) {
-              const matchedDoc = orgSnap.docs[0];
-              preCreatedProfile = matchedDoc.data() as UserProfile;
-            }
-          } catch (lookupErr) {
-            console.warn('Pre-created organizer lookup notice:', lookupErr);
+            await setDoc(userRef, updatedProfile, { merge: true });
+          } catch (writeErr) {
+            console.warn('Assigned events sync write notice:', writeErr);
           }
         }
-
+        setProfile(updatedProfile);
+      } else {
         if (preCreatedProfile) {
           if (preCreatedProfile.status === 'disabled') {
             setError('This account has been disabled by the administrator.');

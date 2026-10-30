@@ -156,36 +156,143 @@ export function subscribeEvents(
   userId: string,
   isAdmin: boolean,
   callback: (events: EventItem[]) => void,
-  userEmail?: string
+  userEmail?: string,
+  assignedEventIds?: string[]
 ): () => void {
   const path = 'events';
-  const q = query(collection(db, path));
 
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      let events: EventItem[] = [];
-      snapshot.forEach((d) => {
-        events.push({ ...(d.data() as EventItem), id: d.id });
-      });
-
-      if (!isAdmin) {
-        const cleanEmail = userEmail?.trim().toLowerCase();
-        events = events.filter((ev) => {
-          const hasUid = Array.isArray(ev.organizerIds) && ev.organizerIds.includes(userId);
-          const hasEmail = cleanEmail && Array.isArray(ev.organizerEmails) && ev.organizerEmails.includes(cleanEmail);
-          return hasUid || hasEmail;
+  // 1. Super Admin: Unrestricted stream
+  if (isAdmin) {
+    const q = query(collection(db, path));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const events: EventItem[] = [];
+        snapshot.forEach((d) => {
+          events.push({ ...(d.data() as EventItem), id: d.id });
         });
+        events.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        callback(events);
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
       }
+    );
+  }
 
-      // Sort newest first
-      events.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callback(events);
-    },
-    (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+  // 2. Organizer: Multi-source targeted subscriptions + self-healing API fallback
+  const cleanEmail = userEmail?.trim().toLowerCase();
+  const eventsMap = new Map<string, EventItem>();
+  const unsubs: (() => void)[] = [];
+  let isDisposed = false;
+
+  const emit = () => {
+    if (isDisposed) return;
+    const sorted = Array.from(eventsMap.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    callback(sorted);
+  };
+
+  // Immediate fast-fetch via server endpoint to ensure instant load & auto-heal
+  getAuthHeaders().then(async (headers) => {
+    try {
+      const res = await fetch('/api/organizer/my-events', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.events)) {
+          data.events.forEach((ev: EventItem) => {
+            if (ev?.id) eventsMap.set(ev.id, ev);
+          });
+          emit();
+        }
+      }
+    } catch (e) {
+      console.warn('Fast-fetch my-events notice:', e);
     }
-  );
+  });
+
+  // Query 1: Where organizerIds contains current user UID
+  if (userId) {
+    try {
+      const qUid = query(collection(db, path), where('organizerIds', 'array-contains', userId));
+      const unsubUid = onSnapshot(
+        qUid,
+        (snap) => {
+          snap.forEach((d) => {
+            eventsMap.set(d.id, { ...(d.data() as EventItem), id: d.id });
+          });
+          emit();
+        },
+        (err) => {
+          console.warn('Realtime organizerIds query note:', err);
+        }
+      );
+      unsubs.push(unsubUid);
+    } catch (e) {
+      console.warn('Attach qUid listener note:', e);
+    }
+  }
+
+  // Query 2: Where organizerEmails contains current user email
+  if (cleanEmail) {
+    try {
+      const qEmail = query(collection(db, path), where('organizerEmails', 'array-contains', cleanEmail));
+      const unsubEmail = onSnapshot(
+        qEmail,
+        (snap) => {
+          snap.forEach((d) => {
+            eventsMap.set(d.id, { ...(d.data() as EventItem), id: d.id });
+          });
+          emit();
+        },
+        (err) => {
+          console.warn('Realtime organizerEmails query note:', err);
+        }
+      );
+      unsubs.push(unsubEmail);
+    } catch (e) {
+      console.warn('Attach qEmail listener note:', e);
+    }
+  }
+
+  // Query 3: Individual listeners for assignedEventIds from user profile
+  if (Array.isArray(assignedEventIds) && assignedEventIds.length > 0) {
+    assignedEventIds.forEach((evId) => {
+      try {
+        const docRef = doc(db, path, evId);
+        const unsubDoc = onSnapshot(
+          docRef,
+          (docSnap) => {
+            if (docSnap.exists()) {
+              eventsMap.set(docSnap.id, { ...(docSnap.data() as EventItem), id: docSnap.id });
+              emit();
+            } else {
+              eventsMap.delete(evId);
+              emit();
+            }
+          },
+          (err) => {
+            console.warn(`Doc listener for event ${evId} note:`, err);
+          }
+        );
+        unsubs.push(unsubDoc);
+      } catch (e) {
+        console.warn(`Attach doc listener for event ${evId} note:`, e);
+      }
+    });
+  }
+
+  return () => {
+    isDisposed = true;
+    unsubs.forEach((unsub) => {
+      try {
+        unsub();
+      } catch {
+        // Safe unsubscribe
+      }
+    });
+  };
 }
 
 export function subscribeEventUploads(

@@ -410,7 +410,10 @@ async function startServer() {
         }
         const eventData = eventSnap.data()!;
         const assigned: string[] = eventData.organizerIds || [];
-        if (!assigned.includes(req.user!.uid)) {
+        const assignedEmails: string[] = eventData.organizerEmails || [];
+        const userEmail = req.user?.email?.toLowerCase();
+        const isMatch = assigned.includes(req.user!.uid) || (userEmail && assignedEmails.map(e => e.toLowerCase()).includes(userEmail));
+        if (!isMatch) {
           return res.status(403).json({ error: 'Forbidden: You are not assigned to manage media for this event.' });
         }
       }
@@ -435,6 +438,186 @@ async function startServer() {
       return res.json({ success: true, deletedUploadId: uploadId });
     } catch (err: unknown) {
       return res.status(500).json({ error: 'Media deletion failed', details: String(err) });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // API ROUTE 6.1: Sync Organizer Profile & Assigned Events
+  // Links pre-created organizer profile and event assignments to user UID
+  // -------------------------------------------------------------
+  app.post('/api/organizer/sync', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const cleanEmail = (user.email || '').trim().toLowerCase();
+      const now = new Date().toISOString();
+      const eventIdsSet = new Set<string>();
+
+      // 1. Fetch current user doc
+      let existingProfile: any = null;
+      try {
+        const userDoc = await adminDb.collection('users').doc(user.uid).get();
+        if (userDoc.exists) {
+          existingProfile = userDoc.data();
+          if (Array.isArray(existingProfile?.assignedEventIds)) {
+            existingProfile.assignedEventIds.forEach((id: string) => eventIdsSet.add(id));
+          }
+        }
+      } catch (e) {
+        console.warn('Read user doc notice:', e);
+      }
+
+      // 2. Lookup any pre-created organizer documents with matching email
+      let preCreatedName = '';
+      let preCreatedStatus = 'active';
+      if (cleanEmail) {
+        try {
+          const preDocs = await adminDb.collection('users').where('email', '==', cleanEmail).get();
+          for (const d of preDocs.docs) {
+            if (d.id !== user.uid) {
+              const dData = d.data();
+              if (Array.isArray(dData.assignedEventIds)) {
+                dData.assignedEventIds.forEach((id: string) => eventIdsSet.add(id));
+              }
+              if (dData.name && !preCreatedName) {
+                preCreatedName = dData.name;
+              }
+              if (dData.status) {
+                preCreatedStatus = dData.status;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Pre-created profile lookup notice:', e);
+        }
+      }
+
+      // 3. Query all events where organizerEmails or organizerIds contains user
+      if (cleanEmail) {
+        try {
+          const eventsByEmail = await adminDb.collection('events')
+            .where('organizerEmails', 'array-contains', cleanEmail)
+            .get();
+          for (const evDoc of eventsByEmail.docs) {
+            eventIdsSet.add(evDoc.id);
+            // Auto-heal: Ensure event document also lists user.uid
+            const evData = evDoc.data();
+            const orgIds: string[] = Array.isArray(evData.organizerIds) ? evData.organizerIds : [];
+            if (!orgIds.includes(user.uid)) {
+              await evDoc.ref.update({
+                organizerIds: FieldValue.arrayUnion(user.uid),
+                updatedAt: now,
+              }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('Event search by organizerEmails notice:', e);
+        }
+      }
+
+      // 4. Save synced profile
+      const assignedEventIds = Array.from(eventIdsSet);
+      const isSuperAdmin = req.isAdmin || cleanEmail === SUPERADMIN_EMAIL.toLowerCase();
+      const updatedProfile = {
+        uid: user.uid,
+        email: cleanEmail,
+        name: existingProfile?.name || preCreatedName || user.name || (isSuperAdmin ? 'Super Admin' : 'Organizer'),
+        role: isSuperAdmin ? 'superadmin' : (existingProfile?.role || 'organizer'),
+        status: existingProfile?.status || preCreatedStatus || 'active',
+        assignedEventIds,
+        updatedAt: now,
+        ...(existingProfile?.createdAt ? {} : { createdAt: now }),
+      };
+
+      try {
+        await adminDb.collection('users').doc(user.uid).set(updatedProfile, { merge: true });
+      } catch (e) {
+        console.warn('Update user profile notice:', e);
+      }
+
+      return res.json({
+        success: true,
+        profile: updatedProfile,
+      });
+    } catch (err: unknown) {
+      return res.status(500).json({ error: 'Organizer sync failed', details: String(err) });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // API ROUTE 6.2: Fetch Assigned Events for Logged In User
+  // -------------------------------------------------------------
+  app.get('/api/organizer/my-events', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const cleanEmail = (user.email || '').trim().toLowerCase();
+      const isSuperAdmin = req.isAdmin || cleanEmail === SUPERADMIN_EMAIL.toLowerCase();
+
+      // If Super Admin, return all events
+      if (isSuperAdmin) {
+        const allSnap = await adminDb.collection('events').get();
+        const events = allSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+        events.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return res.json({ success: true, events });
+      }
+
+      const eventsMap = new Map<string, any>();
+
+      // 1. Fetch by organizerIds
+      try {
+        const snap1 = await adminDb.collection('events')
+          .where('organizerIds', 'array-contains', user.uid)
+          .get();
+        snap1.docs.forEach(d => eventsMap.set(d.id, { ...d.data(), id: d.id }));
+      } catch (e) {
+        console.warn('Query events by organizerIds notice:', e);
+      }
+
+      // 2. Fetch by organizerEmails
+      if (cleanEmail) {
+        try {
+          const snap2 = await adminDb.collection('events')
+            .where('organizerEmails', 'array-contains', cleanEmail)
+            .get();
+          for (const d of snap2.docs) {
+            eventsMap.set(d.id, { ...d.data(), id: d.id });
+            // Auto-heal: add user.uid to organizerIds if not present
+            const data = d.data();
+            if (!Array.isArray(data.organizerIds) || !data.organizerIds.includes(user.uid)) {
+              d.ref.update({
+                organizerIds: FieldValue.arrayUnion(user.uid),
+                updatedAt: new Date().toISOString(),
+              }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn('Query events by organizerEmails notice:', e);
+        }
+      }
+
+      // 3. Fetch from user doc's assignedEventIds
+      try {
+        const userDoc = await adminDb.collection('users').doc(user.uid).get();
+        if (userDoc.exists) {
+          const assignedIds: string[] = userDoc.data()?.assignedEventIds || [];
+          for (const evId of assignedIds) {
+            if (!eventsMap.has(evId)) {
+              const evDoc = await adminDb.collection('events').doc(evId).get();
+              if (evDoc.exists) {
+                eventsMap.set(evDoc.id, { ...evDoc.data(), id: evDoc.id });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Fetch events by user assignedEventIds notice:', e);
+      }
+
+      const events = Array.from(eventsMap.values());
+      events.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      return res.json({ success: true, events });
+    } catch (err: unknown) {
+      return res.status(500).json({ error: 'Failed to fetch assigned events', details: String(err) });
     }
   });
 

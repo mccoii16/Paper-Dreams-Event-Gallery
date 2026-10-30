@@ -97,6 +97,10 @@
           "type": "array",
           "description": "List of assigned organizer user IDs"
         },
+        "organizerEmails": {
+          "type": "array",
+          "description": "List of assigned organizer email addresses"
+        },
         "status": {
           "type": "string",
           "enum": ["active", "disabled"],

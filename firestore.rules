@@ -44,8 +44,11 @@ service cloud.firestore {
 
     function isAssignedOrganizer(eventData) {
       return isSignedIn() && (
-        (eventData.organizerIds is list && (request.auth.uid in eventData.organizerIds)) ||
-        (eventData.keys().hasAny(['organizerEmails']) && eventData.organizerEmails is list && request.auth.token.keys().hasAny(['email']) && (request.auth.token.email.lower() in eventData.organizerEmails))
+        (eventData.keys().hasAny(['organizerIds']) && eventData.organizerIds is list && (request.auth.uid in eventData.organizerIds)) ||
+        (eventData.keys().hasAny(['organizerEmails']) && eventData.organizerEmails is list && request.auth.token.keys().hasAny(['email']) && (
+          (request.auth.token.email in eventData.organizerEmails) ||
+          (request.auth.token.email.lower() in eventData.organizerEmails)
+        ))
       );
     }
 
@@ -93,7 +96,16 @@ service cloud.firestore {
     // 2. /users collection:
     match /users/{userId} {
       allow get: if isValidId(userId) && (isAdmin() || (isSignedIn() && request.auth.uid == userId));
-      allow list: if isAdmin();
+      allow list: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.token.keys().hasAny(['email']) &&
+        resource.data.keys().hasAny(['email']) &&
+        (
+          resource.data.email == request.auth.token.email ||
+          resource.data.email == request.auth.token.email.lower() ||
+          resource.data.email.lower() == request.auth.token.email.lower()
+        )
+      );
       allow create: if isValidId(userId) && (
         isAdmin() || (
           isSignedIn() &&

@@ -42,7 +42,7 @@ interface EventDetailPageProps {
 }
 
 export const EventDetailPage: React.FC<EventDetailPageProps> = ({ eventId, onNavigate }) => {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, profile } = useAuth();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,11 +100,24 @@ export const EventDetailPage: React.FC<EventDetailPageProps> = ({ eventId, onNav
         }
 
         // Check organizer permission
-        const isAssigned = data.organizerIds?.includes(user?.uid || '');
+        const userEmail = (user?.email || '').trim().toLowerCase();
+        const isAssigned =
+          Boolean(isAdmin) ||
+          (Array.isArray(data.organizerIds) && data.organizerIds.includes(user?.uid || '')) ||
+          (userEmail && Array.isArray(data.organizerEmails) && data.organizerEmails.map(e => e.toLowerCase().trim()).includes(userEmail)) ||
+          (Array.isArray(profile?.assignedEventIds) && profile.assignedEventIds.includes(eventId));
+
         if (!isAdmin && !isAssigned) {
           setError('Access restricted. You are not assigned to manage this event.');
           setLoading(false);
           return;
+        }
+
+        // Auto-heal UID in organizerIds if missing
+        if (!isAdmin && user?.uid && (!Array.isArray(data.organizerIds) || !data.organizerIds.includes(user.uid))) {
+          updateEvent(eventId, {
+            organizerIds: Array.from(new Set([...(data.organizerIds || []), user.uid])),
+          }).catch(() => {});
         }
 
         setEvent(data);

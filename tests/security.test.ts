@@ -34,7 +34,8 @@ function evaluateFirestoreRules(context: {
   // 2. /users/{userId}
   if (collection === 'users') {
     if (operation === 'list') {
-      return { allowed: isAdmin, reason: isAdmin ? 'Admin list' : 'PERMISSION_DENIED: Only admin can list users' };
+      const isSelfEmail = isSignedIn && auth?.email && resource?.email && auth.email.toLowerCase() === resource.email.toLowerCase();
+      return { allowed: isAdmin || isSelfEmail, reason: (isAdmin || isSelfEmail) ? 'Allowed' : 'PERMISSION_DENIED: Only admin or self can list users' };
     }
     if (operation === 'create' || operation === 'delete') {
       return { allowed: false, reason: 'PERMISSION_DENIED: User profile mutations must go through server' };
@@ -68,7 +69,9 @@ function evaluateFirestoreRules(context: {
     }
     if (operation === 'update') {
       if (isAdmin) return { allowed: true };
-      const isAssigned = isSignedIn && Array.isArray(resource?.organizerIds) && resource?.organizerIds.includes(auth?.uid);
+      const hasUid = isSignedIn && Array.isArray(resource?.organizerIds) && resource?.organizerIds.includes(auth?.uid);
+      const hasEmail = isSignedIn && auth?.email && Array.isArray(resource?.organizerEmails) && resource?.organizerEmails.map((e: string) => e.toLowerCase()).includes(auth.email.toLowerCase());
+      const isAssigned = hasUid || hasEmail;
       if (!isAssigned) return { allowed: false, reason: 'PERMISSION_DENIED: Not assigned organizer' };
       // Cannot change publicToken or limits
       if (incomingData?.publicToken && incomingData.publicToken !== resource?.publicToken) {
@@ -77,7 +80,9 @@ function evaluateFirestoreRules(context: {
       return { allowed: true };
     }
     if (operation === 'get' || operation === 'list') {
-      const isAssigned = isSignedIn && Array.isArray(resource?.organizerIds) && resource?.organizerIds.includes(auth?.uid);
+      const hasUid = isSignedIn && Array.isArray(resource?.organizerIds) && resource?.organizerIds.includes(auth?.uid);
+      const hasEmail = isSignedIn && auth?.email && Array.isArray(resource?.organizerEmails) && resource?.organizerEmails.map((e: string) => e.toLowerCase()).includes(auth.email.toLowerCase());
+      const isAssigned = hasUid || hasEmail;
       const isPublicActive = resource?.status === 'active';
       return { allowed: isAdmin || isAssigned || isPublicActive, reason: 'Read evaluated' };
     }
@@ -278,4 +283,62 @@ test('MEDIA DELETION: Organizer can delete media only for assigned events', () =
   });
   assert.equal(unassignedDelete.allowed, false);
   assert.match(unassignedDelete.reason || '', /PERMISSION_DENIED/);
+});
+
+test('ORGANIZER ACCESS: Can access assigned event by email even before UID sync', () => {
+  const emailAccess = evaluateFirestoreRules({
+    auth: { uid: 'firebase_auth_uid_999', email: 'organizer@paperdreams.com' },
+    adminDocExists: false,
+    operation: 'get',
+    collection: 'events',
+    docId: 'event_wedding_1',
+    resource: {
+      status: 'disabled', // even if private/disabled
+      organizerIds: ['org_temporary_123'],
+      organizerEmails: ['organizer@paperdreams.com'],
+    },
+  });
+  assert.equal(emailAccess.allowed, true);
+
+  // Different organizer email -> DENIED
+  const wrongEmailAccess = evaluateFirestoreRules({
+    auth: { uid: 'firebase_auth_uid_999', email: 'stranger@gmail.com' },
+    adminDocExists: false,
+    operation: 'get',
+    collection: 'events',
+    docId: 'event_wedding_1',
+    resource: {
+      status: 'disabled',
+      organizerIds: ['org_temporary_123'],
+      organizerEmails: ['organizer@paperdreams.com'],
+    },
+  });
+  assert.equal(wrongEmailAccess.allowed, false);
+});
+
+test('USER PROFILE: Signed-in user can query self profile record by authenticated email', () => {
+  const selfQuery = evaluateFirestoreRules({
+    auth: { uid: 'firebase_auth_uid_999', email: 'organizer@paperdreams.com' },
+    adminDocExists: false,
+    operation: 'list',
+    collection: 'users',
+    resource: {
+      email: 'organizer@paperdreams.com',
+      role: 'organizer',
+    },
+  });
+  assert.equal(selfQuery.allowed, true);
+
+  // Attempting to query another user's email -> DENIED
+  const otherQuery = evaluateFirestoreRules({
+    auth: { uid: 'firebase_auth_uid_999', email: 'organizer@paperdreams.com' },
+    adminDocExists: false,
+    operation: 'list',
+    collection: 'users',
+    resource: {
+      email: 'victim@paperdreams.com',
+      role: 'organizer',
+    },
+  });
+  assert.equal(otherQuery.allowed, false);
 });
